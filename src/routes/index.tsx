@@ -74,10 +74,20 @@ function Landing() {
       <div className="orb w-[420px] h-[420px] top-[40vh] -right-32 bg-aurora/50" />
       <div className="orb w-[480px] h-[480px] bottom-0 left-1/3 bg-olive/30" />
 
+function Landing() {
+  const { data } = useSuspenseQuery(landingQueryOptions);
+  const { partners, opportunities, media } = data;
+
+  return (
+    <main className="relative min-h-screen flex flex-col">
+      <div className="orb w-[520px] h-[520px] -top-40 -left-32 bg-copper/40" />
+      <div className="orb w-[420px] h-[420px] top-[40vh] -right-32 bg-aurora/50" />
+      <div className="orb w-[480px] h-[480px] bottom-0 left-1/3 bg-olive/30" />
+
       <SiteHeader />
       <Hero />
       <NetworkSection partners={partners} />
-      <OpportunitiesSection opportunities={opportunities} />
+      <OpportunitiesSection opportunities={opportunities} media={media} />
       <SiteFooter />
     </main>
   );

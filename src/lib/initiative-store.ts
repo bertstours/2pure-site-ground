@@ -1,4 +1,6 @@
-// src/lib/initiative-store.ts
+// Temporary shim: full Supabase admin rewrite is in progress.
+// Landing page reads from Supabase (live).
+// Admin panel still writes to localStorage for now — next turn migrates it.
 
 export interface InitiativeMedia {
   id: string;
@@ -7,58 +9,6 @@ export interface InitiativeMedia {
   blog_url: string | null;
   reading_text: string | null;
 }
-
-const INITIATIVE_KEY = "csrit_initiative_media";
-const PARTNER_LOGO_KEY = "csrit_partner_logos";
-
-export function getAllInitiativeMedia(): InitiativeMedia[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(INITIATIVE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function getInitiativeMedia(id: string): InitiativeMedia | null {
-  return getAllInitiativeMedia().find((m) => m.id === id) ?? null;
-}
-
-export function saveInitiativeMedia(media: InitiativeMedia): void {
-  if (typeof window === "undefined") return;
-  const all = getAllInitiativeMedia();
-  const idx = all.findIndex((m) => m.id === media.id);
-  if (idx >= 0) all[idx] = media;
-  else all.push(media);
-  localStorage.setItem(INITIATIVE_KEY, JSON.stringify(all));
-}
-
-export function getPartnerLogos(): Record<string, string> {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = localStorage.getItem(PARTNER_LOGO_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
-
-export function savePartnerLogo(partnerId: string, dataUrl: string): void {
-  if (typeof window === "undefined") return;
-  const logos = getPartnerLogos();
-  logos[partnerId] = dataUrl;
-  localStorage.setItem(PARTNER_LOGO_KEY, JSON.stringify(logos));
-}
-
-/** Extract YouTube embed URL from any YouTube link format */
-export function getYouTubeEmbedUrl(url: string): string | null {
-  if (!url) return null;
-  const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]+)/);
-  return match ? `https://www.youtube.com/embed/${match[1]}` : null;
-}
-
-/* ─── Custom Opportunities (full CRUD, localStorage) ─── */
 
 export interface StoredOpportunity {
   id: string;
@@ -71,25 +21,6 @@ export interface StoredOpportunity {
   detail: string | null;
   link: string | null;
 }
-
-const CUSTOM_OPPS_KEY = "csrit_custom_opportunities";
-
-export function getCustomOpportunities(): StoredOpportunity[] | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(CUSTOM_OPPS_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-export function saveCustomOpportunities(opps: StoredOpportunity[]): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(CUSTOM_OPPS_KEY, JSON.stringify(opps));
-}
-
-/* ─── Custom Partners (full CRUD, localStorage) ─── */
 
 export interface StoredPartner {
   id: string;
@@ -106,19 +37,58 @@ export interface StoredPartner {
   sort_order: number;
 }
 
+const INITIATIVE_KEY = "csrit_initiative_media";
+const PARTNER_LOGO_KEY = "csrit_partner_logos";
+const CUSTOM_OPPS_KEY = "csrit_custom_opportunities";
 const CUSTOM_PARTNERS_KEY = "csrit_custom_partners";
 
-export function getCustomPartners(): StoredPartner[] | null {
-  if (typeof window === "undefined") return null;
+function read<T>(k: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
   try {
-    const raw = localStorage.getItem(CUSTOM_PARTNERS_KEY);
-    return raw ? JSON.parse(raw) : null;
+    const raw = localStorage.getItem(k);
+    return raw ? (JSON.parse(raw) as T) : fallback;
   } catch {
-    return null;
+    return fallback;
   }
 }
-
-export function saveCustomPartners(partners: StoredPartner[]): void {
+function write(k: string, v: unknown): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(CUSTOM_PARTNERS_KEY, JSON.stringify(partners));
+  localStorage.setItem(k, JSON.stringify(v));
+}
+
+export function getAllInitiativeMedia(): InitiativeMedia[] {
+  return read<InitiativeMedia[]>(INITIATIVE_KEY, []);
+}
+export function saveInitiativeMedia(media: InitiativeMedia): void {
+  const all = getAllInitiativeMedia();
+  const idx = all.findIndex((m) => m.id === media.id);
+  if (idx >= 0) all[idx] = media;
+  else all.push(media);
+  write(INITIATIVE_KEY, all);
+}
+export function getPartnerLogos(): Record<string, string> {
+  return read<Record<string, string>>(PARTNER_LOGO_KEY, {});
+}
+export function savePartnerLogo(id: string, dataUrl: string): void {
+  const logos = getPartnerLogos();
+  logos[id] = dataUrl;
+  write(PARTNER_LOGO_KEY, logos);
+}
+export function getCustomOpportunities(): StoredOpportunity[] | null {
+  return read<StoredOpportunity[] | null>(CUSTOM_OPPS_KEY, null);
+}
+export function saveCustomOpportunities(o: StoredOpportunity[]): void {
+  write(CUSTOM_OPPS_KEY, o);
+}
+export function getCustomPartners(): StoredPartner[] | null {
+  return read<StoredPartner[] | null>(CUSTOM_PARTNERS_KEY, null);
+}
+export function saveCustomPartners(p: StoredPartner[]): void {
+  write(CUSTOM_PARTNERS_KEY, p);
+}
+
+export function getYouTubeEmbedUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]+)/);
+  return match ? `https://www.youtube.com/embed/${match[1]}` : null;
 }

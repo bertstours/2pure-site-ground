@@ -8,16 +8,10 @@ import {
   type Opportunity,
   type Theme,
   type Metric,
+  type InitiativeMediaRow,
 } from "@/lib/landing.functions";
 import { WORLD_MAP_COUNTRIES } from "@/components/WorldMapData";
-import {
-  getAllInitiativeMedia,
-  getYouTubeEmbedUrl,
-  getCustomPartners,
-  getCustomOpportunities,
-  getPartnerLogos,
-  type InitiativeMedia,
-} from "@/lib/initiative-store";
+import { getYouTubeEmbedUrl, type InitiativeMedia } from "@/lib/initiative-store";
 import {
   Sheet,
   SheetContent,

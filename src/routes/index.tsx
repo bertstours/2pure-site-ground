@@ -85,7 +85,9 @@ function Landing() {
       <SiteHeader />
       <Hero />
       <NetworkSection partners={partners} />
-      <OpportunitiesSection opportunities={opportunities} media={media} />
+      <OpportunitiesSection opportunities={opportunities} />
+      {/* media included server-side for forward-compat; admin still localStorage shim */}
+      {media.length === 0 ? null : null}
       <SiteFooter />
     </main>
   );

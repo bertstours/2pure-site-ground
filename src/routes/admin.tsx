@@ -71,6 +71,14 @@ function AdminPanel() {
       setIsSuperadmin(false);
       return;
     }
+    
+    // Check if user email matches the superadmin email
+    if (session.user.email === SUPERADMIN_EMAIL) {
+      setIsSuperadmin(true);
+      return;
+    }
+    
+    // Fallback to database role check
     const { data, error } = await supabase
       .from("user_roles" as never)
       .select("role")

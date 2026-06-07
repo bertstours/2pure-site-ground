@@ -62,13 +62,13 @@ export const getLandingData = createServerFn({ method: "GET" }).handler(
     opportunities: Opportunity[];
     media: InitiativeMediaRow[];
   }> => {
-    const { supabase } = await import("@/integrations/supabase/client");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const [partnersR, themesR, metricsR, oppsR, mediaR] = await Promise.all([
-      supabase.from("partners" as never).select("*").order("sort_order"),
-      supabase.from("themes" as never).select("*").order("sort_order"),
-      supabase.from("metrics" as never).select("*").order("sort_order"),
-      supabase.from("opportunities" as never).select("*").order("occurred_on", { ascending: false }),
-      supabase.from("initiative_media" as never).select("*"),
+      supabaseAdmin.from("partners" as never).select("*").order("sort_order"),
+      supabaseAdmin.from("themes" as never).select("*").order("sort_order"),
+      supabaseAdmin.from("metrics" as never).select("*").order("sort_order"),
+      supabaseAdmin.from("opportunities" as never).select("*").order("occurred_on", { ascending: false }),
+      supabaseAdmin.from("initiative_media" as never).select("*"),
     ]);
 
     if (partnersR.error) console.error("partners error:", partnersR.error);

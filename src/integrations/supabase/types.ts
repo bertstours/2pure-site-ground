@@ -14,16 +14,242 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      initiative_media: {
+        Row: {
+          blog_url: string | null
+          cover_image_url: string | null
+          created_at: string
+          opportunity_id: string
+          reading_text: string | null
+          updated_at: string
+          youtube_url: string | null
+        }
+        Insert: {
+          blog_url?: string | null
+          cover_image_url?: string | null
+          created_at?: string
+          opportunity_id: string
+          reading_text?: string | null
+          updated_at?: string
+          youtube_url?: string | null
+        }
+        Update: {
+          blog_url?: string | null
+          cover_image_url?: string | null
+          created_at?: string
+          opportunity_id?: string
+          reading_text?: string | null
+          updated_at?: string
+          youtube_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "initiative_media_opportunity_id_fkey"
+            columns: ["opportunity_id"]
+            isOneToOne: true
+            referencedRelation: "opportunities"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      metrics: {
+        Row: {
+          caption: string | null
+          created_at: string
+          id: string
+          label: string
+          slug: string
+          sort_order: number
+          unit: string | null
+          updated_at: string
+          value: number
+        }
+        Insert: {
+          caption?: string | null
+          created_at?: string
+          id?: string
+          label: string
+          slug: string
+          sort_order?: number
+          unit?: string | null
+          updated_at?: string
+          value?: number
+        }
+        Update: {
+          caption?: string | null
+          created_at?: string
+          id?: string
+          label?: string
+          slug?: string
+          sort_order?: number
+          unit?: string | null
+          updated_at?: string
+          value?: number
+        }
+        Relationships: []
+      }
+      opportunities: {
+        Row: {
+          created_at: string
+          detail: string | null
+          id: string
+          link: string | null
+          occurred_on: string
+          partner_short_names: string[]
+          region: string
+          relevance: string
+          status: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          detail?: string | null
+          id?: string
+          link?: string | null
+          occurred_on?: string
+          partner_short_names?: string[]
+          region?: string
+          relevance?: string
+          status?: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          detail?: string | null
+          id?: string
+          link?: string | null
+          occurred_on?: string
+          partner_short_names?: string[]
+          region?: string
+          relevance?: string
+          status?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      partners: {
+        Row: {
+          category: string
+          country: string
+          created_at: string
+          id: string
+          initiatives: string[]
+          logo_url: string | null
+          name: string
+          region: string
+          short_name: string | null
+          sort_order: number
+          strategic_relevance: string
+          themes: string[]
+          tier: number
+          updated_at: string
+        }
+        Insert: {
+          category?: string
+          country?: string
+          created_at?: string
+          id?: string
+          initiatives?: string[]
+          logo_url?: string | null
+          name: string
+          region?: string
+          short_name?: string | null
+          sort_order?: number
+          strategic_relevance?: string
+          themes?: string[]
+          tier?: number
+          updated_at?: string
+        }
+        Update: {
+          category?: string
+          country?: string
+          created_at?: string
+          id?: string
+          initiatives?: string[]
+          logo_url?: string | null
+          name?: string
+          region?: string
+          short_name?: string | null
+          sort_order?: number
+          strategic_relevance?: string
+          themes?: string[]
+          tier?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      themes: {
+        Row: {
+          associated_partner_short_names: string[]
+          created_at: string
+          focus: string
+          id: string
+          slug: string
+          sort_order: number
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          associated_partner_short_names?: string[]
+          created_at?: string
+          focus?: string
+          id?: string
+          slug: string
+          sort_order?: number
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          associated_partner_short_names?: string[]
+          created_at?: string
+          focus?: string
+          id?: string
+          slug?: string
+          sort_order?: number
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "superadmin"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +376,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["superadmin"],
+    },
   },
 } as const

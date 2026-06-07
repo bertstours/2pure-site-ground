@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 
 import {
   getLandingData,
@@ -11,14 +11,7 @@ import {
   type InitiativeMediaRow,
 } from "@/lib/landing.functions";
 import { WORLD_MAP_COUNTRIES } from "@/components/WorldMapData";
-import {
-  getAllInitiativeMedia,
-  getYouTubeEmbedUrl,
-  getCustomPartners,
-  getCustomOpportunities,
-  getPartnerLogos,
-  type InitiativeMedia,
-} from "@/lib/initiative-store";
+import { getYouTubeEmbedUrl, type InitiativeMedia } from "@/lib/initiative-store";
 import {
   Sheet,
   SheetContent,
@@ -81,13 +74,10 @@ function Landing() {
       <div className="orb w-[420px] h-[420px] top-[40vh] -right-32 bg-aurora/50" />
       <div className="orb w-[480px] h-[480px] bottom-0 left-1/3 bg-olive/30" />
 
-
       <SiteHeader />
       <Hero />
       <NetworkSection partners={partners} />
-      <OpportunitiesSection opportunities={opportunities} />
-      {/* media included server-side for forward-compat; admin still localStorage shim */}
-      {media.length === 0 ? null : null}
+      <OpportunitiesSection opportunities={opportunities} media={media} />
       <SiteFooter />
     </main>
   );
@@ -222,17 +212,9 @@ function Hero() {
 const REGIONS_ALL = ["All", "Europe", "North America", "MENA", "Asia", "Oceania"] as const;
 type RegionFilter = (typeof REGIONS_ALL)[number];
 
-function NetworkSection({ partners: serverPartners }: { partners: Partner[] }) {
+function NetworkSection({ partners }: { partners: Partner[] }) {
   const [active, setActive] = useState<Partner | null>(null);
-  const [partners, setPartners] = useState<Partner[]>(serverPartners);
   const [regionFilter, setRegionFilter] = useState<RegionFilter>("All");
-
-  useEffect(() => {
-    const logos = getPartnerLogos();
-    const custom = getCustomPartners();
-    const base = (custom ?? serverPartners) as Partner[];
-    setPartners(base.map((p) => ({ ...p, logo_url: logos[p.id] ?? p.logo_url })));
-  }, []);
 
   const visible =
     regionFilter === "All" ? partners : partners.filter((p) => p.region === regionFilter);
@@ -432,21 +414,24 @@ function SiteFooter() {
     </footer>
   );
 }
-function OpportunitiesSection({ opportunities: serverOpps }: { opportunities: Opportunity[] }) {
+function OpportunitiesSection({
+  opportunities,
+  media,
+}: {
+  opportunities: Opportunity[];
+  media: InitiativeMediaRow[];
+}) {
   const [active, setActive] = useState<Opportunity | null>(null);
-  const [mediaMap, setMediaMap] = useState<Record<string, InitiativeMedia>>({});
-  const [opportunities, setOpportunities] = useState<Opportunity[]>(serverOpps);
-
-  useEffect(() => {
-    const custom = getCustomOpportunities();
-    if (custom) setOpportunities(custom as Opportunity[]);
-    const all = getAllInitiativeMedia();
-    const map: Record<string, InitiativeMedia> = {};
-    all.forEach((m) => {
-      map[m.id] = m;
-    });
-    setMediaMap(map);
-  }, []);
+  const mediaMap: Record<string, InitiativeMedia> = {};
+  media.forEach((m) => {
+    mediaMap[m.opportunity_id] = {
+      opportunity_id: m.opportunity_id,
+      cover_image_url: m.cover_image_url,
+      youtube_url: m.youtube_url,
+      blog_url: m.blog_url,
+      reading_text: m.reading_text,
+    };
+  });
 
   return (
     <section id="initiatives" className="relative z-10 py-14 md:py-16">

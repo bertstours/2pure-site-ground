@@ -1,20 +1,18 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { supabase } from "@/integrations/supabase/client";
 import {
-  getAllInitiativeMedia,
-  saveInitiativeMedia,
-  savePartnerLogo,
-  getPartnerLogos,
-  getCustomOpportunities,
-  saveCustomOpportunities,
-  getCustomPartners,
-  saveCustomPartners,
-  type InitiativeMedia,
-  type StoredOpportunity,
+  newId,
+  upsertPartner,
+  deletePartner,
+  upsertOpportunity,
+  deleteOpportunity,
+  upsertInitiativeMedia,
   type StoredPartner,
+  type StoredOpportunity,
+  type InitiativeMedia,
 } from "@/lib/initiative-store";
 import { getLandingData } from "@/lib/landing.functions";
 
@@ -22,119 +20,131 @@ export const Route = createFileRoute("/admin")({
   component: AdminPanel,
 });
 
-type Tab = "partners" | "initiatives" | "superadmin";
-
+type Tab = "partners" | "initiatives" | "account";
 const SUPERADMIN_EMAIL = "babar.by@gmail.com";
-
-function uuid() {
-  return `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
 
 function AdminPanel() {
   const [tab, setTab] = useState<Tab>("partners");
-  const [partners, setPartners] = useState<StoredPartner[]>([]);
-  const [opportunities, setOpportunities] = useState<StoredOpportunity[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [partnerLogos, setPartnerLogos] = useState<Record<string, string>>({});
-  const [mediaMap, setMediaMap] = useState<Record<string, InitiativeMedia>>({});
+
+  // Auth state
   const [authLoading, setAuthLoading] = useState(true);
   const [authEmail, setAuthEmail] = useState<string | null>(null);
-  const [superadminMsg, setSuperadminMsg] = useState("");
+  const [isSuperadmin, setIsSuperadmin] = useState(false);
 
-  // Edit states
+  // Data
+  const [loadingData, setLoadingData] = useState(true);
+  const [partners, setPartners] = useState<StoredPartner[]>([]);
+  const [opportunities, setOpportunities] = useState<StoredOpportunity[]>([]);
+  const [mediaMap, setMediaMap] = useState<Record<string, InitiativeMedia>>({});
+
+  // Edit state
   const [editingPartner, setEditingPartner] = useState<StoredPartner | null>(null);
   const [editingInitiative, setEditingInitiative] = useState<StoredOpportunity | null>(null);
   const [editingMedia, setEditingMedia] = useState<InitiativeMedia | null>(null);
   const [saveMsg, setSaveMsg] = useState("");
-
-  const refreshLocalData = () => {
-    const logos = getPartnerLogos();
-    setPartnerLogos(logos);
-    const all = getAllInitiativeMedia();
-    const map: Record<string, InitiativeMedia> = {};
-    all.forEach((m) => {
-      map[m.id] = m;
-    });
-    setMediaMap(map);
-  };
-
-  useEffect(() => {
-    refreshLocalData();
-    getLandingData()
-      .then(({ partners: p, opportunities: o }) => {
-        // Prefer localStorage custom data if it exists
-        const customP = getCustomPartners();
-        const customO = getCustomOpportunities();
-        setPartners(customP ?? (p as StoredPartner[]));
-        setOpportunities(customO ?? (o as StoredOpportunity[]));
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-
-    supabase.auth.getSession().then(({ data }: { data: { session: Session | null } }) => {
-      setAuthEmail(data.session?.user?.email ?? null);
-      setAuthLoading(false);
-    });
-
-    const { data } = supabase.auth.onAuthStateChange((_event, session: Session | null) => {
-      setAuthEmail(session?.user?.email ?? null);
-      setAuthLoading(false);
-    });
-
-    return () => data.subscription.unsubscribe();
-  }, []);
 
   const flash = (msg: string) => {
     setSaveMsg(msg);
     setTimeout(() => setSaveMsg(""), 3000);
   };
 
-  // ── Partner CRUD ──
-  const handleSavePartner = (p: StoredPartner, logoDataUrl?: string | null) => {
-    if (logoDataUrl) savePartnerLogo(p.id, logoDataUrl);
-    const updated = partners.some((x) => x.id === p.id)
-      ? partners.map((x) => (x.id === p.id ? p : x))
-      : [...partners, p];
-    setPartners(updated);
-    saveCustomPartners(updated);
-    refreshLocalData();
-    setEditingPartner(null);
-    flash("Partner saved");
-  };
+  const refreshData = useCallback(async () => {
+    setLoadingData(true);
+    try {
+      const { partners: p, opportunities: o, media } = await getLandingData();
+      setPartners(p as StoredPartner[]);
+      setOpportunities(o as StoredOpportunity[]);
+      const map: Record<string, InitiativeMedia> = {};
+      media.forEach((m) => {
+        map[m.opportunity_id] = m;
+      });
+      setMediaMap(map);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingData(false);
+    }
+  }, []);
 
-  const handleDeletePartner = (id: string) => {
-    const updated = partners.filter((p) => p.id !== id);
-    setPartners(updated);
-    saveCustomPartners(updated);
-    flash("Partner deleted");
-  };
+  const checkRole = useCallback(async (session: Session | null) => {
+    if (!session?.user) {
+      setIsSuperadmin(false);
+      return;
+    }
+    const { data, error } = await supabase
+      .from("user_roles" as never)
+      .select("role")
+      .eq("user_id", session.user.id)
+      .eq("role", "superadmin")
+      .maybeSingle();
+    if (error) {
+      console.error(error);
+      setIsSuperadmin(false);
+    } else {
+      setIsSuperadmin(!!data);
+    }
+  }, []);
 
-  // ── Initiative CRUD ──
-  const handleSaveInitiative = (o: StoredOpportunity, media: InitiativeMedia) => {
-    const updated = opportunities.some((x) => x.id === o.id)
-      ? opportunities.map((x) => (x.id === o.id ? o : x))
-      : [...opportunities, o];
-    setOpportunities(updated);
-    saveCustomOpportunities(updated);
-    saveInitiativeMedia(media);
-    refreshLocalData();
-    setEditingInitiative(null);
-    setEditingMedia(null);
-    flash("Initiative saved");
-  };
+  useEffect(() => {
+    void refreshData();
+    supabase.auth.getSession().then(({ data }) => {
+      setAuthEmail(data.session?.user?.email ?? null);
+      void checkRole(data.session).finally(() => setAuthLoading(false));
+    });
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthEmail(session?.user?.email ?? null);
+      void checkRole(session).finally(() => setAuthLoading(false));
+    });
+    return () => data.subscription.unsubscribe();
+  }, [refreshData, checkRole]);
 
-  const handleDeleteInitiative = (id: string) => {
-    const updated = opportunities.filter((o) => o.id !== id);
-    setOpportunities(updated);
-    saveCustomOpportunities(updated);
-    flash("Initiative deleted");
+  // ── CRUD handlers (only callable when isSuperadmin) ──
+  const handleSavePartner = async (p: StoredPartner) => {
+    try {
+      await upsertPartner(p);
+      await refreshData();
+      setEditingPartner(null);
+      flash("Partner saved");
+    } catch (e: unknown) {
+      flash(`Save failed: ${(e as Error).message}`);
+    }
+  };
+  const handleDeletePartner = async (id: string) => {
+    try {
+      await deletePartner(id);
+      await refreshData();
+      flash("Partner deleted");
+    } catch (e: unknown) {
+      flash(`Delete failed: ${(e as Error).message}`);
+    }
+  };
+  const handleSaveInitiative = async (o: StoredOpportunity, m: InitiativeMedia) => {
+    try {
+      await upsertOpportunity(o);
+      await upsertInitiativeMedia(m);
+      await refreshData();
+      setEditingInitiative(null);
+      setEditingMedia(null);
+      flash("Initiative saved");
+    } catch (e: unknown) {
+      flash(`Save failed: ${(e as Error).message}`);
+    }
+  };
+  const handleDeleteInitiative = async (id: string) => {
+    try {
+      await deleteOpportunity(id);
+      await refreshData();
+      flash("Initiative deleted");
+    } catch (e: unknown) {
+      flash(`Delete failed: ${(e as Error).message}`);
+    }
   };
 
   const openEditInitiative = (o: StoredOpportunity) => {
     setEditingInitiative(o);
     setEditingMedia(
       mediaMap[o.id] ?? {
-        id: o.id,
+        opportunity_id: o.id,
         cover_image_url: null,
         youtube_url: null,
         blog_url: null,
@@ -143,23 +153,21 @@ function AdminPanel() {
     );
   };
 
-  if (loading) {
+  // ── Render ──
+  if (authLoading) {
     return (
       <div className="min-h-screen grid place-items-center">
-        <div className="text-center space-y-3">
-          <div
-            className="w-8 h-8 rounded-full border-2 animate-spin mx-auto"
-            style={{ borderColor: "var(--csrit-gold)", borderTopColor: "transparent" }}
-          />
-          <p className="text-sm text-muted-foreground">Loading admin panel…</p>
-        </div>
+        <p className="text-sm text-muted-foreground">Checking session…</p>
       </div>
     );
   }
 
+  if (!isSuperadmin) {
+    return <LoginScreen authEmail={authEmail} />;
+  }
+
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
       <header className="sticky top-0 z-40 border-b border-border/40 bg-background/95 backdrop-blur">
         <div className="mx-auto max-w-7xl px-6 h-16 flex items-center justify-between gap-6">
           <div className="flex items-center gap-3 shrink-0">
@@ -172,17 +180,17 @@ function AdminPanel() {
             </span>
           </div>
           <nav className="flex items-center gap-1 bg-muted/50 rounded-xl p-1">
-            {(["partners", "initiatives", "superadmin"] as Tab[]).map((t) => (
+            {(["partners", "initiatives", "account"] as Tab[]).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
-                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${tab === t ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all capitalize ${
+                  tab === t
+                    ? "bg-background shadow text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
               >
-                {t === "partners"
-                  ? "Partner Logos"
-                  : t === "initiatives"
-                    ? "Initiatives"
-                    : "Superadmin"}
+                {t === "partners" ? "Partner Logos" : t === "initiatives" ? "Initiatives" : "Account"}
               </button>
             ))}
           </nav>
@@ -190,16 +198,7 @@ function AdminPanel() {
             to="/"
             className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition shrink-0"
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path
-                d="M10 3L5 8l5 5"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            Back to Website
+            ← Back to Website
           </Link>
         </div>
       </header>
@@ -211,15 +210,16 @@ function AdminPanel() {
       )}
 
       <main className="mx-auto max-w-7xl px-6 py-10">
-        {tab === "partners" && (
+        {loadingData ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : tab === "partners" ? (
           <PartnersTab
             partners={partners}
-            partnerLogos={partnerLogos}
             onEdit={setEditingPartner}
             onDelete={handleDeletePartner}
             onNew={() =>
               setEditingPartner({
-                id: uuid(),
+                id: newId(),
                 name: "",
                 short_name: "",
                 country: "",
@@ -234,16 +234,16 @@ function AdminPanel() {
               })
             }
           />
-        )}
-        {tab === "initiatives" && (
+        ) : tab === "initiatives" ? (
           <InitiativesTab
             opportunities={opportunities}
             mediaMap={mediaMap}
             onEdit={openEditInitiative}
             onDelete={handleDeleteInitiative}
             onNew={() => {
-              const newOpp: StoredOpportunity = {
-                id: uuid(),
+              const id = newId();
+              setEditingInitiative({
+                id,
                 title: "",
                 region: "Europe",
                 partner_short_names: [],
@@ -252,10 +252,9 @@ function AdminPanel() {
                 occurred_on: new Date().toISOString().slice(0, 10),
                 detail: null,
                 link: null,
-              };
-              setEditingInitiative(newOpp);
+              });
               setEditingMedia({
-                id: newOpp.id,
+                opportunity_id: id,
                 cover_image_url: null,
                 youtube_url: null,
                 blog_url: null,
@@ -263,22 +262,13 @@ function AdminPanel() {
               });
             }}
           />
-        )}
-        {tab === "superadmin" && (
-          <SuperadminTab
-            authLoading={authLoading}
-            authEmail={authEmail}
-            message={superadminMsg}
-            onMessage={setSuperadminMsg}
-          />
+        ) : (
+          <AccountTab authEmail={authEmail} />
         )}
       </main>
 
       <PartnerEditSheet
         partner={editingPartner}
-        currentLogo={
-          editingPartner ? (partnerLogos[editingPartner.id] ?? editingPartner.logo_url) : null
-        }
         onClose={() => setEditingPartner(null)}
         onSave={handleSavePartner}
       />
@@ -296,120 +286,94 @@ function AdminPanel() {
   );
 }
 
-/* ════ SUPERADMIN TAB ════ */
+/* ════ LOGIN ════ */
 
-function SuperadminTab({
-  authLoading,
-  authEmail,
-  message,
-  onMessage,
-}: {
-  authLoading: boolean;
-  authEmail: string | null;
-  message: string;
-  onMessage: (value: string) => void;
-}) {
+function LoginScreen({ authEmail }: { authEmail: string | null }) {
   const [sending, setSending] = useState(false);
-  const isAllowed = authEmail?.toLowerCase() === SUPERADMIN_EMAIL;
+  const [msg, setMsg] = useState("");
 
   const sendMagicLink = async () => {
     setSending(true);
-    onMessage("");
+    setMsg("");
     const emailRedirectTo =
       typeof window !== "undefined" ? `${window.location.origin}/admin` : undefined;
     const { error } = await supabase.auth.signInWithOtp({
       email: SUPERADMIN_EMAIL,
-      options: { emailRedirectTo },
+      options: { emailRedirectTo, shouldCreateUser: true },
     });
-    if (error) {
-      onMessage(error.message);
-    } else {
-      onMessage(
-        `Magic link sent to ${SUPERADMIN_EMAIL}. Open your email and click the link, then return here.`,
-      );
-    }
+    if (error) setMsg(error.message);
+    else setMsg(`Magic link sent to ${SUPERADMIN_EMAIL}. Check your inbox.`);
     setSending(false);
   };
 
   const signOut = async () => {
     await supabase.auth.signOut();
-    onMessage("Signed out.");
+    setMsg("Signed out.");
   };
 
   return (
-    <div>
-      <div className="mb-8">
-        <h1 className="text-display text-3xl font-semibold">Superadmin</h1>
-        <p className="mt-2 text-muted-foreground text-sm">
-          This tab is protected by Supabase magic-link login and only unlocks for {SUPERADMIN_EMAIL}
-          .
-        </p>
-      </div>
-
-      <div className="rounded-2xl border border-border/50 bg-card p-6 shadow-sm space-y-5 max-w-3xl">
+    <div className="min-h-screen grid place-items-center bg-background px-6">
+      <div className="w-full max-w-md rounded-2xl border border-border/50 bg-card p-8 shadow-sm space-y-5">
         <div>
-          <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Status</p>
-          {authLoading ? (
-            <p className="mt-2 text-sm">Checking session…</p>
-          ) : isAllowed ? (
-            <div className="mt-2 space-y-2">
-              <p className="text-sm text-green-700 font-medium">Superadmin access granted</p>
-              <p className="text-sm text-muted-foreground">Signed in as {authEmail}</p>
-            </div>
-          ) : authEmail ? (
-            <div className="mt-2 space-y-2">
-              <p className="text-sm text-destructive font-medium">Access denied</p>
-              <p className="text-sm text-muted-foreground">
-                Signed in as {authEmail}. Only {SUPERADMIN_EMAIL} can open this tab.
-              </p>
-            </div>
-          ) : (
-            <p className="mt-2 text-sm text-muted-foreground">Not signed in.</p>
-          )}
+          <div className="w-9 h-9 rounded-full copper-grad mb-4" />
+          <h1 className="text-display text-2xl font-semibold">Superadmin sign-in</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            This admin panel is restricted to <span className="font-medium">{SUPERADMIN_EMAIL}</span>.
+            Sign in with a magic link sent to that address.
+          </p>
         </div>
-
-        {!isAllowed && (
-          <div className="rounded-xl bg-muted/40 border border-border/50 p-4 space-y-3">
-            <p className="text-sm leading-relaxed">
-              Click below to receive a magic link at{" "}
-              <span className="font-medium">{SUPERADMIN_EMAIL}</span>.
-            </p>
-            <button
-              onClick={sendMagicLink}
-              disabled={sending}
-              className="rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-              style={{ background: "var(--csrit-gold)" }}
-            >
-              {sending ? "Sending magic link…" : "Send magic link"}
+        {authEmail && (
+          <div className="rounded-xl bg-destructive/10 border border-destructive/30 p-3 text-sm">
+            Signed in as <span className="font-medium">{authEmail}</span> — access denied.
+            <button onClick={signOut} className="ml-2 underline">
+              Sign out
             </button>
           </div>
         )}
+        <button
+          onClick={sendMagicLink}
+          disabled={sending}
+          className="w-full rounded-xl py-3 text-sm font-semibold text-white disabled:opacity-60"
+          style={{ background: "var(--csrit-gold)" }}
+        >
+          {sending ? "Sending…" : "Send magic link"}
+        </button>
+        {msg && <p className="text-sm">{msg}</p>}
+        <Link
+          to="/"
+          className="block text-center text-xs text-muted-foreground hover:text-foreground"
+        >
+          ← Back to website
+        </Link>
+      </div>
+    </div>
+  );
+}
 
-        {isAllowed && (
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="rounded-xl border border-border/50 p-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Account</p>
-              <p className="mt-2 text-sm">Superadmin email: {authEmail}</p>
-              <button
-                onClick={signOut}
-                className="mt-4 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted/50 transition"
-              >
-                Sign out
-              </button>
-            </div>
-            <div className="rounded-xl border border-border/50 p-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                Security note
-              </p>
-              <p className="mt-2 text-sm text-muted-foreground leading-relaxed">
-                Service role keys and other secrets should stay in environment variables only. They
-                are intentionally not editable in the browser.
-              </p>
-            </div>
-          </div>
-        )}
+/* ════ ACCOUNT TAB ════ */
 
-        {message && <p className="text-sm font-medium">{message}</p>}
+function AccountTab({ authEmail }: { authEmail: string | null }) {
+  const signOut = async () => {
+    await supabase.auth.signOut();
+  };
+  return (
+    <div className="max-w-2xl">
+      <h1 className="text-display text-3xl font-semibold mb-2">Account</h1>
+      <p className="text-sm text-muted-foreground mb-6">
+        You are signed in as the superadmin. All changes you make are saved to the secure database
+        and visible to all visitors immediately.
+      </p>
+      <div className="rounded-2xl border border-border/50 bg-card p-6 space-y-4">
+        <div>
+          <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Signed in as</p>
+          <p className="mt-1 font-medium">{authEmail}</p>
+        </div>
+        <button
+          onClick={signOut}
+          className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-muted/50 transition"
+        >
+          Sign out
+        </button>
       </div>
     </div>
   );
@@ -419,13 +383,11 @@ function SuperadminTab({
 
 function PartnersTab({
   partners,
-  partnerLogos,
   onEdit,
   onDelete,
   onNew,
 }: {
   partners: StoredPartner[];
-  partnerLogos: Record<string, string>;
   onEdit: (p: StoredPartner) => void;
   onDelete: (id: string) => void;
   onNew: () => void;
@@ -436,7 +398,7 @@ function PartnersTab({
         <div>
           <h1 className="text-display text-3xl font-semibold">Partner Logos</h1>
           <p className="mt-1 text-muted-foreground text-sm">
-            Upload logos and manage network partners.
+            Upload logos and manage network partners. Saved to the secure database.
           </p>
         </div>
         <button
@@ -447,39 +409,46 @@ function PartnersTab({
           + Add Partner
         </button>
       </div>
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {partners.map((p) => (
-          <PartnerCard
-            key={p.id}
-            partner={p}
-            logoSrc={partnerLogos[p.id] ?? p.logo_url}
-            onEdit={() => onEdit(p)}
-            onDelete={() => {
-              if (window.confirm(`Delete ${p.name}?`)) onDelete(p.id);
-            }}
-          />
-        ))}
-      </div>
+      {partners.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No partners yet — click "Add Partner" to create the first one.
+        </p>
+      ) : (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {partners.map((p) => (
+            <PartnerCard
+              key={p.id}
+              partner={p}
+              onEdit={() => onEdit(p)}
+              onDelete={() => {
+                if (window.confirm(`Delete ${p.name}?`)) onDelete(p.id);
+              }}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 function PartnerCard({
   partner,
-  logoSrc,
   onEdit,
   onDelete,
 }: {
   partner: StoredPartner;
-  logoSrc: string | null | undefined;
   onEdit: () => void;
   onDelete: () => void;
 }) {
   return (
     <div className="rounded-2xl border border-border/50 bg-card p-4 flex flex-col gap-3 shadow-sm hover:shadow-md transition-shadow">
       <div className="w-full aspect-square rounded-xl bg-muted/40 grid place-items-center overflow-hidden">
-        {logoSrc ? (
-          <img src={logoSrc} alt={partner.name} className="w-full h-full object-contain p-3" />
+        {partner.logo_url ? (
+          <img
+            src={partner.logo_url}
+            alt={partner.name}
+            className="w-full h-full object-contain p-3"
+          />
         ) : (
           <div className="text-center">
             <div className="text-2xl font-bold text-muted-foreground/50">
@@ -548,19 +517,25 @@ function InitiativesTab({
           + Add Initiative
         </button>
       </div>
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-        {opportunities.map((o) => (
-          <InitiativeAdminCard
-            key={o.id}
-            opportunity={o}
-            media={mediaMap[o.id] ?? null}
-            onEdit={() => onEdit(o)}
-            onDelete={() => {
-              if (window.confirm(`Delete "${o.title}"?`)) onDelete(o.id);
-            }}
-          />
-        ))}
-      </div>
+      {opportunities.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No initiatives yet — click "Add Initiative" to create the first one.
+        </p>
+      ) : (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          {opportunities.map((o) => (
+            <InitiativeAdminCard
+              key={o.id}
+              opportunity={o}
+              media={mediaMap[o.id] ?? null}
+              onEdit={() => onEdit(o)}
+              onDelete={() => {
+                if (window.confirm(`Delete "${o.title}"?`)) onDelete(o.id);
+              }}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -589,25 +564,8 @@ function InitiativeAdminCard({
         {media?.cover_image_url ? (
           <img src={media.cover_image_url} alt={o.title} className="w-full h-full object-cover" />
         ) : (
-          <div className="absolute inset-0 grid place-items-center opacity-30">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
-              <rect
-                x="3"
-                y="3"
-                width="18"
-                height="18"
-                rx="2"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              />
-              <circle cx="8.5" cy="8.5" r="1.5" stroke="currentColor" strokeWidth="1.5" />
-              <path
-                d="M21 15l-5-5L5 21"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-            </svg>
+          <div className="absolute inset-0 grid place-items-center opacity-30 text-xs">
+            no cover
           </div>
         )}
         <span
@@ -682,32 +640,26 @@ function InitiativeAdminCard({
 
 function PartnerEditSheet({
   partner,
-  currentLogo,
   onClose,
   onSave,
 }: {
   partner: StoredPartner | null;
-  currentLogo: string | null | undefined;
   onClose: () => void;
-  onSave: (p: StoredPartner, logo?: string | null) => void;
+  onSave: (p: StoredPartner) => void;
 }) {
   const [form, setForm] = useState<StoredPartner | null>(null);
-  const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (partner) {
-      setForm({ ...partner });
-      setLogoPreview(currentLogo ?? null);
-    }
-  }, [partner, currentLogo]);
+    if (partner) setForm({ ...partner });
+  }, [partner]);
 
   const set = (field: keyof StoredPartner, value: unknown) =>
     setForm((f) => (f ? { ...f, [field]: value } : f));
 
   const handleLogoFile = (file: File) => {
     const reader = new FileReader();
-    reader.onload = () => setLogoPreview(reader.result as string);
+    reader.onload = () => set("logo_url", reader.result as string);
     reader.readAsDataURL(file);
   };
 
@@ -721,11 +673,10 @@ function PartnerEditSheet({
       <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
         <SheetHeader className="mb-6">
           <SheetTitle className="text-display text-xl">
-            {form.id.startsWith("local-") ? "New Partner" : "Edit Partner"}
+            {partner && partners_isNew(partner.id) ? "New Partner" : "Edit Partner"}
           </SheetTitle>
         </SheetHeader>
         <div className="space-y-5 px-1 pb-10">
-          {/* Logo */}
           <div>
             <label className="block text-xs uppercase tracking-[0.18em] text-muted-foreground mb-2">
               Logo
@@ -735,8 +686,8 @@ function PartnerEditSheet({
                 className="w-20 h-20 rounded-xl bg-muted/40 border border-border/60 grid place-items-center overflow-hidden shrink-0 cursor-pointer"
                 onClick={() => fileRef.current?.click()}
               >
-                {logoPreview ? (
-                  <img src={logoPreview} className="w-full h-full object-contain p-2" />
+                {form.logo_url ? (
+                  <img src={form.logo_url} className="w-full h-full object-contain p-2" />
                 ) : (
                   <span className="text-2xl font-bold text-muted-foreground/40">
                     {(form.short_name ?? form.name).slice(0, 2).toUpperCase() || "?"}
@@ -748,11 +699,11 @@ function PartnerEditSheet({
                   onClick={() => fileRef.current?.click()}
                   className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted/50 transition"
                 >
-                  {logoPreview ? "Replace Logo" : "Upload Logo"}
+                  {form.logo_url ? "Replace Logo" : "Upload Logo"}
                 </button>
-                {logoPreview && (
+                {form.logo_url && (
                   <button
-                    onClick={() => setLogoPreview(null)}
+                    onClick={() => set("logo_url", null)}
                     className="ml-2 text-xs text-muted-foreground hover:text-destructive"
                   >
                     Remove
@@ -773,19 +724,11 @@ function PartnerEditSheet({
           </div>
 
           {[
-            {
-              label: "Name",
-              field: "name" as const,
-              placeholder: "e.g. Massachusetts Institute of Technology",
-            },
+            { label: "Name", field: "name" as const, placeholder: "e.g. Massachusetts Institute of Technology" },
             { label: "Short Name", field: "short_name" as const, placeholder: "e.g. MIT" },
             { label: "Country", field: "country" as const, placeholder: "e.g. USA" },
             { label: "Category", field: "category" as const, placeholder: "e.g. University" },
-            {
-              label: "Strategic Relevance",
-              field: "strategic_relevance" as const,
-              placeholder: "Brief description...",
-            },
+            { label: "Strategic Relevance", field: "strategic_relevance" as const, placeholder: "Brief description..." },
           ].map(({ label, field, placeholder }) => (
             <div key={field}>
               <label className="block text-xs uppercase tracking-[0.18em] text-muted-foreground mb-2">
@@ -800,7 +743,6 @@ function PartnerEditSheet({
             </div>
           ))}
 
-          {/* Region */}
           <div>
             <label className="block text-xs uppercase tracking-[0.18em] text-muted-foreground mb-2">
               Region
@@ -816,7 +758,6 @@ function PartnerEditSheet({
             </select>
           </div>
 
-          {/* Tier */}
           <div>
             <label className="block text-xs uppercase tracking-[0.18em] text-muted-foreground mb-2">
               Tier (1 = inner ring, 2 = outer ring)
@@ -832,7 +773,7 @@ function PartnerEditSheet({
           </div>
 
           <button
-            onClick={() => onSave(form, logoPreview)}
+            onClick={() => onSave(form)}
             className="w-full rounded-xl py-3 text-sm font-semibold text-white"
             style={{ background: "var(--csrit-gold)" }}
           >
@@ -842,6 +783,11 @@ function PartnerEditSheet({
       </SheetContent>
     </Sheet>
   );
+}
+
+// helper kept outside to avoid component-name collisions
+function partners_isNew(_id: string): boolean {
+  return false; // sheet title shown as "Edit"/"New" doesn't depend on this anymore
 }
 
 /* ════ INITIATIVE EDIT SHEET ════ */
@@ -870,17 +816,10 @@ function InitiativeEditSheet({
       setForm({ ...opportunity });
       setPartnersInput(opportunity.partner_short_names.join(", "));
     }
-    if (media) {
-      setCoverPreview(media.cover_image_url ?? null);
-      setYoutubeUrl(media.youtube_url ?? "");
-      setBlogUrl(media.blog_url ?? "");
-      setReadingText(media.reading_text ?? "");
-    } else {
-      setCoverPreview(null);
-      setYoutubeUrl("");
-      setBlogUrl("");
-      setReadingText("");
-    }
+    setCoverPreview(media?.cover_image_url ?? null);
+    setYoutubeUrl(media?.youtube_url ?? "");
+    setBlogUrl(media?.blog_url ?? "");
+    setReadingText(media?.reading_text ?? "");
   }, [opportunity, media]);
 
   const set = (field: keyof StoredOpportunity, value: unknown) =>
@@ -894,7 +833,7 @@ function InitiativeEditSheet({
 
   const handleSave = () => {
     if (!form || !opportunity) return;
-    const finalForm = {
+    const finalForm: StoredOpportunity = {
       ...form,
       partner_short_names: partnersInput
         .split(",")
@@ -902,7 +841,7 @@ function InitiativeEditSheet({
         .filter(Boolean),
     };
     const finalMedia: InitiativeMedia = {
-      id: opportunity.id,
+      opportunity_id: opportunity.id,
       cover_image_url: coverPreview,
       youtube_url: youtubeUrl.trim() || null,
       blog_url: blogUrl.trim() || null,
@@ -920,41 +859,22 @@ function InitiativeEditSheet({
     <Sheet open={!!opportunity} onOpenChange={(o) => !o && onClose()}>
       <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto">
         <SheetHeader className="mb-6">
-          <SheetTitle className="text-display text-xl">
-            {form.id.startsWith("local-") ? "New Initiative" : "Edit Initiative"}
-          </SheetTitle>
+          <SheetTitle className="text-display text-xl">Edit Initiative</SheetTitle>
         </SheetHeader>
         <div className="space-y-5 px-1 pb-10">
-          {/* Cover Image */}
           <div>
             <label className="block text-xs uppercase tracking-[0.18em] text-muted-foreground mb-2">
               Cover Image
             </label>
             <div
-              className="relative w-full aspect-video rounded-xl border-2 border-dashed border-border/60 overflow-hidden cursor-pointer hover:border-[var(--csrit-gold)] transition group"
+              className="relative w-full aspect-video rounded-xl border-2 border-dashed border-border/60 overflow-hidden cursor-pointer hover:border-[var(--csrit-gold)] transition"
               onClick={() => coverRef.current?.click()}
             >
               {coverPreview ? (
                 <img src={coverPreview} className="w-full h-full object-cover" />
               ) : (
-                <div className="absolute inset-0 grid place-items-center text-muted-foreground/40 group-hover:text-muted-foreground/60 transition">
-                  <div className="text-center">
-                    <svg
-                      width="32"
-                      height="32"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      className="mx-auto mb-2"
-                    >
-                      <path
-                        d="M12 5v14M5 12h14"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                    <p className="text-xs">Click to upload cover image</p>
-                  </div>
+                <div className="absolute inset-0 grid place-items-center text-muted-foreground/40 text-xs">
+                  Click to upload cover image
                 </div>
               )}
             </div>
@@ -978,21 +898,16 @@ function InitiativeEditSheet({
             />
           </div>
 
-          {/* Data fields */}
           {[
-            { label: "Title", field: "title" as const, placeholder: "Initiative title" },
-            {
-              label: "Relevance / Description",
-              field: "relevance" as const,
-              placeholder: "What this initiative is about...",
-            },
-            { label: "Detail", field: "detail" as const, placeholder: "More context..." },
-          ].map(({ label, field, placeholder }) => (
+            { label: "Title", field: "title" as const, placeholder: "Initiative title", multiline: false },
+            { label: "Relevance / Description", field: "relevance" as const, placeholder: "What this initiative is about...", multiline: true },
+            { label: "Detail", field: "detail" as const, placeholder: "More context...", multiline: true },
+          ].map(({ label, field, placeholder, multiline }) => (
             <div key={field}>
               <label className="block text-xs uppercase tracking-[0.18em] text-muted-foreground mb-2">
                 {label}
               </label>
-              {field === "relevance" || field === "detail" ? (
+              {multiline ? (
                 <textarea
                   value={(form[field] as string) ?? ""}
                   onChange={(e) => set(field, e.target.value)}
@@ -1038,36 +953,32 @@ function InitiativeEditSheet({
             />
           </div>
 
-          {/* Media */}
           <div className="border-t border-border/40 pt-5">
             <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground mb-4">Media</p>
-            {[
-              {
-                label: "YouTube URL",
-                value: youtubeUrl,
-                set: setYoutubeUrl,
-                placeholder: "https://youtube.com/watch?v=...",
-              },
-              {
-                label: "Blog / Article URL",
-                value: blogUrl,
-                set: setBlogUrl,
-                placeholder: "https://...",
-              },
-            ].map(({ label, value, set: setter, placeholder }) => (
-              <div key={label} className="mb-4">
-                <label className="block text-xs uppercase tracking-[0.18em] text-muted-foreground mb-2">
-                  {label}
-                </label>
-                <input
-                  type="url"
-                  value={value}
-                  onChange={(e) => setter(e.target.value)}
-                  placeholder={placeholder}
-                  className={inputCls}
-                />
-              </div>
-            ))}
+            <div className="mb-4">
+              <label className="block text-xs uppercase tracking-[0.18em] text-muted-foreground mb-2">
+                YouTube URL
+              </label>
+              <input
+                type="url"
+                value={youtubeUrl}
+                onChange={(e) => setYoutubeUrl(e.target.value)}
+                placeholder="https://youtube.com/watch?v=..."
+                className={inputCls}
+              />
+            </div>
+            <div className="mb-4">
+              <label className="block text-xs uppercase tracking-[0.18em] text-muted-foreground mb-2">
+                Blog / Article URL
+              </label>
+              <input
+                type="url"
+                value={blogUrl}
+                onChange={(e) => setBlogUrl(e.target.value)}
+                placeholder="https://..."
+                className={inputCls}
+              />
+            </div>
             <div>
               <label className="block text-xs uppercase tracking-[0.18em] text-muted-foreground mb-2">
                 Reading Text

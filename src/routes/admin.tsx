@@ -42,6 +42,7 @@ function AdminPanel() {
   const [editingInitiative, setEditingInitiative] = useState<StoredOpportunity | null>(null);
   const [editingMedia, setEditingMedia] = useState<InitiativeMedia | null>(null);
   const [saveMsg, setSaveMsg] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
   const flash = (msg: string) => {
     setSaveMsg(msg);
@@ -60,7 +61,8 @@ function AdminPanel() {
       });
       setMediaMap(map);
     } catch (e) {
-      console.error(e);
+      console.error("Error refreshing data:", e);
+      flash(`Error loading data: ${(e as Error).message}`);
     } finally {
       setLoadingData(false);
     }
@@ -86,7 +88,7 @@ function AdminPanel() {
       .eq("role", "superadmin")
       .maybeSingle();
     if (error) {
-      console.error(error);
+      console.error("Error checking role:", error);
       setIsSuperadmin(false);
     } else {
       setIsSuperadmin(!!data);
@@ -108,43 +110,65 @@ function AdminPanel() {
 
   // ── CRUD handlers (only callable when isSuperadmin) ──
   const handleSavePartner = async (p: StoredPartner) => {
+    setIsSaving(true);
     try {
+      console.log("Saving partner:", p);
       await upsertPartner(p);
       await refreshData();
       setEditingPartner(null);
-      flash("Partner saved");
+      flash("Partner saved successfully");
     } catch (e: unknown) {
+      console.error("Partner save error:", e);
       flash(`Save failed: ${(e as Error).message}`);
+    } finally {
+      setIsSaving(false);
     }
   };
+
   const handleDeletePartner = async (id: string) => {
+    setIsSaving(true);
     try {
       await deletePartner(id);
       await refreshData();
       flash("Partner deleted");
     } catch (e: unknown) {
+      console.error("Partner delete error:", e);
       flash(`Delete failed: ${(e as Error).message}`);
+    } finally {
+      setIsSaving(false);
     }
   };
+
   const handleSaveInitiative = async (o: StoredOpportunity, m: InitiativeMedia) => {
+    setIsSaving(true);
     try {
+      console.log("Saving opportunity:", o);
+      console.log("Saving initiative media:", m);
       await upsertOpportunity(o);
       await upsertInitiativeMedia(m);
       await refreshData();
       setEditingInitiative(null);
       setEditingMedia(null);
-      flash("Initiative saved");
+      flash("Initiative saved successfully");
     } catch (e: unknown) {
+      console.error("Initiative save error:", e);
       flash(`Save failed: ${(e as Error).message}`);
+    } finally {
+      setIsSaving(false);
     }
   };
+
   const handleDeleteInitiative = async (id: string) => {
+    setIsSaving(true);
     try {
       await deleteOpportunity(id);
       await refreshData();
       flash("Initiative deleted");
     } catch (e: unknown) {
+      console.error("Initiative delete error:", e);
       flash(`Delete failed: ${(e as Error).message}`);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -279,6 +303,7 @@ function AdminPanel() {
         partner={editingPartner}
         onClose={() => setEditingPartner(null)}
         onSave={handleSavePartner}
+        isSaving={isSaving}
       />
 
       <InitiativeEditSheet
@@ -289,6 +314,7 @@ function AdminPanel() {
           setEditingMedia(null);
         }}
         onSave={handleSaveInitiative}
+        isSaving={isSaving}
       />
     </div>
   );
@@ -650,10 +676,12 @@ function PartnerEditSheet({
   partner,
   onClose,
   onSave,
+  isSaving,
 }: {
   partner: StoredPartner | null;
   onClose: () => void;
-  onSave: (p: StoredPartner) => void;
+  onSave: (p: StoredPartner) => Promise<void>;
+  isSaving: boolean;
 }) {
   const [form, setForm] = useState<StoredPartner | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -669,6 +697,15 @@ function PartnerEditSheet({
     const reader = new FileReader();
     reader.onload = () => set("logo_url", reader.result as string);
     reader.readAsDataURL(file);
+  };
+
+  const handleSaveClick = async () => {
+    if (!form) {
+      console.error("Form is null, cannot save");
+      return;
+    }
+    console.log("Save button clicked, form:", form);
+    await onSave(form);
   };
 
   if (!form) return null;
@@ -781,11 +818,12 @@ function PartnerEditSheet({
           </div>
 
           <button
-            onClick={() => onSave(form)}
-            className="w-full rounded-xl py-3 text-sm font-semibold text-white"
+            onClick={handleSaveClick}
+            disabled={isSaving}
+            className="w-full rounded-xl py-3 text-sm font-semibold text-white disabled:opacity-60 transition"
             style={{ background: "var(--csrit-gold)" }}
           >
-            Save Partner
+            {isSaving ? "Saving…" : "Save Partner"}
           </button>
         </div>
       </SheetContent>
@@ -805,11 +843,13 @@ function InitiativeEditSheet({
   media,
   onClose,
   onSave,
+  isSaving,
 }: {
   opportunity: StoredOpportunity | null;
   media: InitiativeMedia | null;
   onClose: () => void;
-  onSave: (o: StoredOpportunity, m: InitiativeMedia) => void;
+  onSave: (o: StoredOpportunity, m: InitiativeMedia) => Promise<void>;
+  isSaving: boolean;
 }) {
   const [form, setForm] = useState<StoredOpportunity | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
@@ -839,8 +879,11 @@ function InitiativeEditSheet({
     reader.readAsDataURL(file);
   };
 
-  const handleSave = () => {
-    if (!form || !opportunity) return;
+  const handleSaveClick = async () => {
+    if (!form || !opportunity) {
+      console.error("Form or opportunity is null, cannot save");
+      return;
+    }
     const finalForm: StoredOpportunity = {
       ...form,
       partner_short_names: partnersInput
@@ -855,7 +898,8 @@ function InitiativeEditSheet({
       blog_url: blogUrl.trim() || null,
       reading_text: readingText.trim() || null,
     };
-    onSave(finalForm, finalMedia);
+    console.log("Save button clicked, form:", finalForm, "media:", finalMedia);
+    await onSave(finalForm, finalMedia);
   };
 
   if (!form) return null;
@@ -1002,11 +1046,12 @@ function InitiativeEditSheet({
           </div>
 
           <button
-            onClick={handleSave}
-            className="w-full rounded-xl py-3 text-sm font-semibold text-white"
+            onClick={handleSaveClick}
+            disabled={isSaving}
+            className="w-full rounded-xl py-3 text-sm font-semibold text-white disabled:opacity-60 transition"
             style={{ background: "var(--csrit-gold)" }}
           >
-            Save Initiative
+            {isSaving ? "Saving…" : "Save Initiative"}
           </button>
         </div>
       </SheetContent>

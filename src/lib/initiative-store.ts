@@ -1,26 +1,10 @@
-// Temporary shim: full Supabase admin rewrite is in progress.
-// Landing page reads from Supabase (live).
-// Admin panel still writes to localStorage for now — next turn migrates it.
+// Supabase-backed CRUD for the admin panel.
+// RLS on the database enforces that only the superadmin role
+// (babar.by@gmail.com) can write. Public read is allowed.
 
-export interface InitiativeMedia {
-  id: string;
-  cover_image_url: string | null;
-  youtube_url: string | null;
-  blog_url: string | null;
-  reading_text: string | null;
-}
+import { supabase } from "@/integrations/supabase/client";
 
-export interface StoredOpportunity {
-  id: string;
-  title: string;
-  region: string;
-  partner_short_names: string[];
-  status: string;
-  relevance: string;
-  occurred_on: string;
-  detail: string | null;
-  link: string | null;
-}
+export type Region = "Europe" | "North America" | "MENA" | "Asia" | "Oceania";
 
 export interface StoredPartner {
   id: string;
@@ -37,58 +21,65 @@ export interface StoredPartner {
   sort_order: number;
 }
 
-const INITIATIVE_KEY = "csrit_initiative_media";
-const PARTNER_LOGO_KEY = "csrit_partner_logos";
-const CUSTOM_OPPS_KEY = "csrit_custom_opportunities";
-const CUSTOM_PARTNERS_KEY = "csrit_custom_partners";
-
-function read<T>(k: string, fallback: T): T {
-  if (typeof window === "undefined") return fallback;
-  try {
-    const raw = localStorage.getItem(k);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-function write(k: string, v: unknown): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(k, JSON.stringify(v));
+export interface StoredOpportunity {
+  id: string;
+  title: string;
+  region: string;
+  partner_short_names: string[];
+  status: string;
+  relevance: string;
+  occurred_on: string;
+  detail: string | null;
+  link: string | null;
 }
 
-export function getAllInitiativeMedia(): InitiativeMedia[] {
-  return read<InitiativeMedia[]>(INITIATIVE_KEY, []);
-}
-export function saveInitiativeMedia(media: InitiativeMedia): void {
-  const all = getAllInitiativeMedia();
-  const idx = all.findIndex((m) => m.id === media.id);
-  if (idx >= 0) all[idx] = media;
-  else all.push(media);
-  write(INITIATIVE_KEY, all);
-}
-export function getPartnerLogos(): Record<string, string> {
-  return read<Record<string, string>>(PARTNER_LOGO_KEY, {});
-}
-export function savePartnerLogo(id: string, dataUrl: string): void {
-  const logos = getPartnerLogos();
-  logos[id] = dataUrl;
-  write(PARTNER_LOGO_KEY, logos);
-}
-export function getCustomOpportunities(): StoredOpportunity[] | null {
-  return read<StoredOpportunity[] | null>(CUSTOM_OPPS_KEY, null);
-}
-export function saveCustomOpportunities(o: StoredOpportunity[]): void {
-  write(CUSTOM_OPPS_KEY, o);
-}
-export function getCustomPartners(): StoredPartner[] | null {
-  return read<StoredPartner[] | null>(CUSTOM_PARTNERS_KEY, null);
-}
-export function saveCustomPartners(p: StoredPartner[]): void {
-  write(CUSTOM_PARTNERS_KEY, p);
+export interface InitiativeMedia {
+  opportunity_id: string;
+  cover_image_url: string | null;
+  youtube_url: string | null;
+  blog_url: string | null;
+  reading_text: string | null;
 }
 
 export function getYouTubeEmbedUrl(url: string | null | undefined): string | null {
   if (!url) return null;
-  const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]+)/);
-  return match ? `https://www.youtube.com/embed/${match[1]}` : null;
+  const m = url.match(
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]+)/,
+  );
+  return m ? `https://www.youtube.com/embed/${m[1]}` : null;
+}
+
+export function newId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+// ── Partners ──────────────────────────────────────────────
+export async function upsertPartner(p: StoredPartner): Promise<void> {
+  const { error } = await supabase.from("partners" as never).upsert(p as never);
+  if (error) throw error;
+}
+export async function deletePartner(id: string): Promise<void> {
+  const { error } = await supabase.from("partners" as never).delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ── Opportunities ─────────────────────────────────────────
+export async function upsertOpportunity(o: StoredOpportunity): Promise<void> {
+  const { error } = await supabase.from("opportunities" as never).upsert(o as never);
+  if (error) throw error;
+}
+export async function deleteOpportunity(id: string): Promise<void> {
+  // initiative_media cascades on delete (FK)
+  const { error } = await supabase.from("opportunities" as never).delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ── Initiative media ──────────────────────────────────────
+export async function upsertInitiativeMedia(m: InitiativeMedia): Promise<void> {
+  const { error } = await supabase
+    .from("initiative_media" as never)
+    .upsert(m as never, { onConflict: "opportunity_id" } as never);
+  if (error) throw error;
 }
